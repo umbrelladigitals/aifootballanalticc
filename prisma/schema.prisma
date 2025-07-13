@@ -1,0 +1,243 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  hashedPassword String?
+  
+  // Subscription info
+  isSubscribed       Boolean   @default(false)
+  subscriptionId     String?   @unique
+  subscriptionStatus String?
+  trialEndsAt        DateTime?
+  subscriptionEndsAt DateTime?
+  
+  // User content
+  comments      Comment[]
+  predictions   Prediction[]
+  bettingWorkspaces BettingWorkspace[]
+  
+  accounts Account[]
+  sessions Session[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+model Team {
+  id          String @id @default(cuid())
+  name        String
+  slug        String @unique
+  logo        String?
+  country     String?
+  league      String?
+  foundedYear Int?
+  
+  // Team stats
+  currentForm String? // Son 5 maçın durumu: WWDLL gibi
+  
+  homeMatches Match[] @relation("HomeTeam")
+  awayMatches Match[] @relation("AwayTeam")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("teams")
+}
+
+model Match {
+  id          String   @id @default(cuid())
+  homeTeamId  String   @map("home_team_id")
+  awayTeamId  String   @map("away_team_id")
+  matchDate   DateTime
+  league      String
+  season      String
+  
+  // Match result
+  homeScore   Int?
+  awayScore   Int?
+  status      MatchStatus @default(SCHEDULED)
+  
+  // Match stats
+  homeStats   Json? // Possession, shots, etc.
+  awayStats   Json?
+  
+  // AI Analysis
+  aiPrediction   String? @db.Text
+  confidenceScore Float?
+  keyFactors     Json? // Important factors for prediction
+  
+  homeTeam Team @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam Team @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  
+  comments    Comment[]
+  predictions Prediction[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("matches")
+}
+
+model Comment {
+  id      String @id @default(cuid())
+  content String @db.Text
+  userId  String @map("user_id")
+  matchId String @map("match_id")
+  
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("comments")
+}
+
+model Prediction {
+  id         String          @id @default(cuid())
+  userId     String          @map("user_id")
+  matchId    String          @map("match_id")
+  
+  predictedHomeScore Int?
+  predictedAwayScore Int?
+  predictionType     PredictionType
+  confidence         Float? // 0-1 arası
+  reasoning          String? @db.Text
+  
+  // Prediction outcome
+  isCorrect Boolean?
+  points    Int      @default(0)
+  
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, matchId])
+  @@map("predictions")
+}
+
+model BettingWorkspace {
+  id          String @id @default(cuid())
+  name        String
+  description String? @db.Text
+  userId      String  @map("user_id")
+  
+  // Workspace settings
+  budget      Float   @default(0)
+  totalGain   Float   @default(0)
+  totalLoss   Float   @default(0)
+  
+  bets Bet[]
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("betting_workspaces")
+}
+
+model Bet {
+  id         String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  matchId    String @map("match_id")
+  
+  betType    String // "win", "over_under", "both_score", etc.
+  selection  String // "home", "away", "over", "under", etc.
+  odds       Float
+  stake      Float
+  
+  // Bet result
+  status     BetStatus @default(PENDING)
+  payout     Float?
+  
+  workspace BettingWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("bets")
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINISHED
+  POSTPONED
+  CANCELLED
+}
+
+enum PredictionType {
+  SCORE
+  WINNER
+  OVER_UNDER
+  BOTH_TEAMS_SCORE
+  CORRECT_SCORE
+}
+
+enum BetStatus {
+  PENDING
+  WON
+  LOST
+  VOID
+}
